@@ -1,0 +1,16 @@
+# Estado interno del workspace de CubeIDE (rutas de cada PC)
+.metadata/
+
+# Salidas de compilacion y binarios
+**/Debug/
+**/Release/
+*.o
+*.elf
+*.map
+*.list
+*.su
+*.exe
+*.bak
+
+# Proyecto IAR que CubeMX genera y no se usa
+**/EWARM/
