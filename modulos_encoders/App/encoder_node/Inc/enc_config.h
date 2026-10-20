@@ -11,15 +11,20 @@
 #define ENC_COUNTS_PER_REV  4096u     /* AS5600: 12 bits */
 
 /* ---- Bus serie (UART por software en PB9 Tx / PB10 Rx, DE+RE en PA8) ---- */
-#define ENC_BAUD            115200u
+#define ENC_BAUD            230400u   /* maximo estimado del UART por software (la ISR de
+                                         bit cuesta ~100 ciclos de 192). Si hay errores
+                                         de CRC bajar a 115200u */
 #define ENC_SYSCLK_HZ       44236800u /* HSE 11.0592 MHz x4 (PLL). Debe dividir
                                          exacto por ENC_BAUD */
-/* Silencio entre tramas Modbus RTU: 1.75 ms fijo si baud > 19200, si no 3.5
- * caracteres de 11 bits. */
-#define ENC_GAP_US          ((ENC_BAUD > 19200u) ? 1750u : (38500000u / ENC_BAUD))
-/* Ciclos de CPU que tarda la ISR del flanco de arranque en iniciar el timer.
- * Se resta del primer muestreo. Ajustar solo si hay errores de trama. */
-#define ENC_RX_ENTRY_COMP_CYCLES 30u
+/* Silencio que el nodo espera para dar por terminada una trama. Modbus estandar
+ * pide 1.75 ms fijo (baud > 19200) o 3.5 caracteres (baud <= 19200). A 230400 o mas
+ * se usa 500 us: el nodo responde antes y la lectura de 6 nodos va mas rapida. El
+ * adaptador USB entrega la trama seguida, asi que no hay pausas internas de ese tamano. */
+#define ENC_GAP_US          ((ENC_BAUD >= 230400u) ? 500u : ((ENC_BAUD > 19200u) ? 1750u : (38500000u / ENC_BAUD)))
+/* Ciclos de CPU entre el flanco de arranque y el arranque del timer (entrada de la
+ * interrupcion ~19 + codigo de swuart_exti_isr ~50 + esperas de flash, medido en el
+ * desensamblado). Se resta del primer muestreo para caer a mitad del bit 0. */
+#define ENC_RX_ENTRY_COMP_CYCLES 80u
 
 /* 1: swuart.c define TIM16_IRQHandler, TIM17_IRQHandler y EXTI4_15_IRQHandler.
  * 0: el proyecto grande ya los define; que llame a swuart_tim16_isr(),

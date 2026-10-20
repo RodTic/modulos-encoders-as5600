@@ -51,6 +51,8 @@ void enc_regs_set_flag(enc_regs_t *r, uint16_t flag, int on)
 void enc_regs_snapshot(enc_regs_t *r)
 {
     r->snap_cal = r->cal;
+    r->snap_raw = r->raw;
+    r->snap_status = r->status;
     r->snap_seq++;
 }
 
@@ -100,6 +102,9 @@ static uint8_t read_reg(void *ctx, uint8_t is_input, uint16_t addr, uint16_t *v)
     case ENC_IREG_SNAP_ANGLE:   *v = r->snap_cal;     return MB_EX_NONE;
     case ENC_IREG_SNAP_SEQ:     *v = r->snap_seq;     return MB_EX_NONE;
     case ENC_IREG_FW_VERSION:   *v = ENC_FW_VERSION;  return MB_EX_NONE;
+    case ENC_IREG_SNAP_RAW:     *v = r->snap_raw;     return MB_EX_NONE;
+    case ENC_IREG_SNAP_STATUS:  *v = r->snap_status;  return MB_EX_NONE;
+    case ENC_IREG_SNAP_SEQ2:    *v = r->snap_seq;     return MB_EX_NONE;
     }
     if (addr >= ENC_IREG_UID0 && addr < ENC_IREG_UID0 + 6u) {
         *v = r->uid[addr - ENC_IREG_UID0];

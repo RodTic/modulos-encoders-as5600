@@ -105,9 +105,12 @@ int main(void)
     { const uint8_t p[] = {0x03, 0x00, 0x04, 0x00, 0x01};                       /* holding 4 no existe */
       n = xfer(1, p, sizeof p, r);
       CHECK(n == 5 && r[1] == 0x83 && r[2] == MB_EX_ILLEGAL_ADDRESS); }
-    { const uint8_t p[] = {0x04, 0x00, 0x0D, 0x00, 0x01};                       /* input 13 no existe */
+    { const uint8_t p[] = {0x04, 0x00, 0x10, 0x00, 0x01};                       /* input 16 no existe */
       n = xfer(1, p, sizeof p, r);
       CHECK(n == 5 && r[1] == 0x84 && r[2] == MB_EX_ILLEGAL_ADDRESS); }
+    { const uint8_t p[] = {0x04, 0x00, 0x0F, 0x00, 0x02};                       /* 15..16: el 16 no existe */
+      n = xfer(1, p, sizeof p, r);
+      CHECK(n == 5 && r[2] == MB_EX_ILLEGAL_ADDRESS); }
     { const uint8_t p[] = {0x04, 0x00, 0x00, 0x00, 0x00};                       /* cantidad 0 */
       n = xfer(1, p, sizeof p, r);
       CHECK(n == 5 && r[2] == MB_EX_ILLEGAL_VALUE); }
@@ -141,6 +144,26 @@ int main(void)
       CHECK(regs.snap_cal == 500 && regs.snap_seq == 1); }
     { const uint8_t p[] = {0x06, 0x00, ENC_HREG_OFFSET, 0x00, 0x0A};            /* offset por broadcast */
       CHECK(xfer(0, p, sizeof p, r) == 0 && regs.offset == 10); }
+
+    /* --- snapshot crudo (registros 13..15): no depende de offset ni de sentido --- */
+    fresh();
+    regs.offset = 1000; regs.direction = 1;
+    enc_regs_set_magnet(&regs, (1u << 5));                  /* iman detectado */
+    enc_regs_update(&regs, 700);
+    CHECK(regs.cal == enc_calibrate(700, 1, 1000) && regs.cal != 700);
+    enc_regs_snapshot(&regs);
+    enc_regs_update(&regs, 900);                            /* el brazo sigue moviendose */
+    { const uint8_t p[] = {0x04, 0x00, ENC_IREG_SNAP_RAW, 0x00, 0x03};
+      n = xfer(1, p, sizeof p, r);
+      CHECK(n == 5 + 6 && resp_ok(r, n) && r[2] == 6);
+      CHECK(r[3] == (700 >> 8) && r[4] == (700 & 0xFF));              /* crudo congelado, sin offset */
+      CHECK(r[5] == 0 && (r[6] & 0x0F) == ENC_STATUS_MAGNET);         /* estado en el snapshot */
+      CHECK(r[7] == 0 && r[8] == 1); }                                /* SNAP_SEQ = 1 */
+    { const uint8_t p[] = {0x04, 0x00, ENC_IREG_SNAP_SEQ, 0x00, 0x01};
+      n = xfer(1, p, sizeof p, r);
+      CHECK(n == 7 && r[3] == 0 && r[4] == 1); }                      /* y el registro 5 coincide */
+    enc_regs_snapshot(&regs);
+    CHECK(regs.snap_raw == 900 && regs.snap_seq == 2);
 
     /* --- SET_ZERO: la lectura actual pasa a 0, con y sin inversion --- */
     fresh();

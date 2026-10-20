@@ -12,5 +12,9 @@
 *.exe
 *.bak
 
+# Cache de Python
+__pycache__/
+*.pyc
+
 # Proyecto IAR que CubeMX genera y no se usa
 **/EWARM/

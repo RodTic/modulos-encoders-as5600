@@ -4,7 +4,7 @@ Módulo para el STM32F030C8T6 + AS5600 + SP3485. Lee el ángulo, lo calibra (off
 
 ## Qué hace
 
-- Esclavo Modbus RTU, 115200 8N1, ID 1..247 (una placa nueva es 247).
+- Esclavo Modbus RTU, **230400 8N1**, ID 1..247 (una placa nueva es 247). El silencio de fin de trama es de 500 µs (el estándar pide 1,75 ms; se acorta para que la lectura de 6 placas sea más rápida).
 - El offset, el sentido y el ID se guardan en la última página de flash.
 - `broadcast` de snapshot: congela el ángulo de los 6 nodos casi en el mismo instante.
 
@@ -31,6 +31,11 @@ Input (FC 04, solo lectura):
 | 5 | SNAP_SEQ |
 | 6..11 | UID de 96 bits del chip |
 | 12 | FW_VERSION (0x0100 = 1.00) |
+| 13 | SNAP_RAW: ángulo **crudo** (sin offset ni sentido) congelado por el último snapshot |
+| 14 | SNAP_STATUS: el STATUS en el momento del snapshot |
+| 15 | SNAP_SEQ: número de snapshot (copia del registro 5) |
+
+Los registros 13 a 15 se leen con una sola consulta FC 04 (3 registros, respuesta de 11 bytes). Es lo que usa `encoders_modbus.py`.
 
 `cal = ((sentido ? 4096 - raw : raw) - offset) mod 4096`. Un grado son 4096/360 = 11,38 cuentas.
 
@@ -77,7 +82,30 @@ Los registros `>= 0x0100` son del proyecto grande: implementa `enc_user_reg_read
 - Resistencias de bias (pull-up en A, pull-down en B) en el maestro, para que la línea no genere bytes basura en reposo.
 - Asignar el ID con una placa nueva conectada a la vez, porque todas parten como 247.
 - Guardar en flash congela el nodo unos 40 ms. El script espera 150 ms.
-- Si hay errores de CRC a 115200: bajar `ENC_BAUD` a 57600 (en `enc_config.h` y `-b` en el script), o cablear a PA9/PA10 y reemplazar `swuart.c` por un USART1 de hardware.
+- `ENC_BAUD` es 230400, el máximo estimado del UART por software: la ISR de cada bit cuesta ~100 ciclos de CPU y el bit dura 192, y a 460800 es imposible (96). Está al límite y **no se ha probado en la placa**. Si hay errores de CRC, bajar `ENC_BAUD` a 115200 (el silencio pasa solo a 1750 µs) y cambiar el baudrate también en el script y en `LectorEncoders`; si sigue fallando, 57600. La otra salida es soldar los cables a PA9/PA10 y usar el proyecto `modulos_encoders_usart`.
+- `ENC_RX_ENTRY_COMP_CYCLES` (80) centra el primer muestreo en el bit 0. Salió del desensamblado de la ISR; si hay errores de trama sin otra causa, es lo primero que se ajusta (probar 60 y 100).
+
+## Lectura rápida desde el laptop
+
+`tools/encoders_modbus.py` es un reemplazo de `LectorEncoders` (el de `encoders.py` del proyecto grande): misma interfaz, pero lee las 6 placas por Modbus en vez de las líneas del ESP32. Entrega los ángulos en grados, **crudos** (sin offset ni sentido) y nunca escribe en las placas.
+
+```python
+from encoders_modbus import LectorEncoders
+lector = LectorEncoders("COM6", 230400)   # los baudios del firmware
+print(lector.angulos, lector.frecuencia_hz)
+```
+
+Cada ronda hace un snapshot por broadcast y una consulta por placa. Si un canal falla (sin respuesta, imán ausente, CRC mala, snapshot perdido) conserva su último valor bueno y suma un error. Una placa caída se salta 1 s para no frenar a las demás. `sincronizar=False` omite el snapshot (más rápido, pero cada canal en un instante distinto).
+
+**Frecuencia estimada** (sin medir; la incógnita es la latencia USB de tu adaptador, entre 1 y 2,5 ms por consulta): **~40 a 60 rondas por segundo** con este firmware (230400 baudios), frente a ~35 Hz del ESP32. El baudrate casi no influye; mandan el silencio de fin de trama y la latencia USB. El proyecto con USART de hardware llega a ~45 a 80 Hz.
+
+Para medirla de verdad con las 6 placas conectadas y con ID 1 a 6:
+
+```
+python tools/enc_tool.py -p COM6 -b 230400 bench 1 2 3 4 5 6 --count 500
+```
+
+Poner el resultado en `FRECUENCIA_FIRMWARE_HZ` de `config.py` (se usa para decidir si los datos están frescos).
 
 ## Pruebas en PC (sin placa)
 
@@ -85,5 +113,5 @@ Desde la carpeta del proyecto (`modulos_encoders/`):
 
 ```
 gcc -Wall -Wextra -std=c11 -IApp/encoder_node/Inc tools/test_mb_rtu.c App/encoder_node/Src/mb_slave.c App/encoder_node/Src/enc_regs.c -o tools/test_mb_rtu.exe && tools/test_mb_rtu.exe
-gcc -Wall -Wextra -std=c11 -IApp/encoder_node/Inc tools/sim_slave.c App/encoder_node/Src/mb_slave.c App/encoder_node/Src/enc_regs.c -o tools/sim_slave.exe && python tools/enc_tool.py selftest
+gcc -Wall -Wextra -std=c11 -IApp/encoder_node/Inc tools/sim_slave.c App/encoder_node/Src/mb_slave.c App/encoder_node/Src/enc_regs.c -o tools/sim_slave.exe && python tools/enc_tool.py selftest && python tools/test_encoders_modbus.py
 ```

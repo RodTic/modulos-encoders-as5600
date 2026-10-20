@@ -21,6 +21,11 @@
 #define ENC_IREG_SNAP_SEQ      5u   /* numero de snapshot */
 #define ENC_IREG_UID0          6u   /* 6..11: UID de 96 bits del chip */
 #define ENC_IREG_FW_VERSION    12u
+/* Bloque de 3 registros (13..15) para leer de una vez, tras un snapshot, el angulo
+ * CRUDO (sin offset ni sentido), el estado y el numero de snapshot. */
+#define ENC_IREG_SNAP_RAW      13u
+#define ENC_IREG_SNAP_STATUS   14u
+#define ENC_IREG_SNAP_SEQ2     15u  /* copia de SNAP_SEQ (5) */
 
 #define ENC_CMD_SAVE      1u   /* guarda id/offset/sentido en flash */
 #define ENC_CMD_RESTORE   2u   /* offset=0, sentido=0, id=247 (en RAM; luego SAVE) */
@@ -44,7 +49,7 @@
 typedef struct {
     uint16_t offset, direction, id, pending_id;
     uint16_t raw, cal, status, sample_count;
-    uint16_t snap_cal, snap_seq;
+    uint16_t snap_cal, snap_seq, snap_raw, snap_status;
     uint16_t uid[6];
     uint8_t  actions;
 } enc_regs_t;

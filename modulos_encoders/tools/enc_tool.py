@@ -17,12 +17,14 @@ import os
 import struct
 import subprocess
 import sys
+import threading
 import time
 
 HREG_OFFSET, HREG_DIR, HREG_ID, HREG_CMD = 0, 1, 2, 3
 CMD_SAVE, CMD_RESTORE, CMD_SET_ZERO, CMD_RESET, CMD_SNAPSHOT = 1, 2, 3, 4, 5
 IREG_ANGLE_CAL, IREG_ANGLE_RAW, IREG_STATUS, IREG_COUNT, IREG_SNAP, IREG_SNAP_SEQ = 0, 1, 2, 3, 4, 5
 IREG_UID0, IREG_FW = 6, 12
+IREG_SNAP_RAW = 13          # 13 = crudo congelado, 14 = estado, 15 = numero de snapshot
 DEFAULT_ID = 247
 SAVE_WAIT_S = 0.15          # el nodo no responde ~40 ms mientras borra/escribe flash
 STATUS_BITS = [(0x01, "iman detectado"), (0x02, "iman debil"), (0x04, "iman fuerte"),
@@ -47,12 +49,37 @@ def with_crc(frame):
     return frame + struct.pack("<H", crc16(frame))
 
 
+def silencio_nodo_s(baud):
+    """Silencio con el que la placa da por terminada una trama (igual que ENC_GAP_US del firmware)."""
+    if baud >= 230400:
+        return 500e-6
+    if baud > 19200:
+        return 1750e-6
+    return 38.5 / baud
+
+
+def espera_tras_broadcast_s(baud):
+    """Minimo entre un broadcast y la siguiente consulta: sale la trama (8 bytes), la placa
+    detecta el fin de trama y toma una lectura fresca (~0.9 ms)."""
+    return 80.0 / baud + silencio_nodo_s(baud) + 0.0009
+
+
+def esperar(segundos):
+    """Espera precisa para tiempos cortos (time.sleep solo es exacto a ~1 ms en Windows)."""
+    fin = time.perf_counter() + segundos
+    if segundos > 0.003:
+        time.sleep(segundos - 0.002)
+    while time.perf_counter() < fin:
+        pass
+
+
 class Bus:
     """port: cualquier objeto con write(bytes), read(n), reset_input_buffer(), flush()."""
 
-    def __init__(self, port, retries=2):
+    def __init__(self, port, retries=2, baud=115200):
         self.port = port
         self.retries = retries
+        self.baud = baud
 
     def _txrx(self, req, expect_len):
         err = "sin respuesta (timeout)"
@@ -100,7 +127,7 @@ class Bus:
         self.port.reset_input_buffer()
         self.port.write(with_crc(struct.pack(">BBHH", 0, 6, addr, value)))
         self.port.flush()
-        time.sleep(0.005)       # que los nodos terminen su lectura fresca
+        esperar(espera_tras_broadcast_s(self.baud))     # que los nodos terminen su lectura fresca
 
     def snapshot(self):
         self.broadcast(HREG_CMD, CMD_SNAPSHOT)
@@ -200,6 +227,28 @@ def cmd_poll(bus, a):
             time.sleep(sleep)
 
 
+def cmd_bench(bus, a):
+    """Mide cuantas rondas por segundo logra tu adaptador con estas placas (misma ronda que
+    encoders_modbus.py: snapshot por broadcast + una consulta FC 04 por placa)."""
+    bus.retries = 0
+    direccion, cantidad = (IREG_ANGLE_RAW, 2) if a.no_sync else (IREG_SNAP_RAW, 3)
+    errores = {n: 0 for n in a.ids}
+    t0 = time.perf_counter()
+    for _ in range(a.count):
+        if not a.no_sync:
+            bus.snapshot()
+        for n in a.ids:
+            try:
+                bus.read_input(n, direccion, cantidad)
+            except ModbusError:
+                errores[n] += 1
+    dt = time.perf_counter() - t0
+    print("%d rondas en %.2f s: %.1f rondas/s (%.1f ms por ronda) a %d baudios, %s" % (
+        a.count, dt, a.count / dt, 1000.0 * dt / a.count, bus.baud,
+        "sin snapshot" if a.no_sync else "con snapshot"))
+    print("errores por nodo: " + "  ".join("%d:%d" % (n, e) for n, e in errores.items()))
+
+
 # ---------------------------------------------------------------- autoprueba
 class SimPort:
     """Habla con tools/sim_slave.exe (mismo C del firmware) por un pipe."""
@@ -208,14 +257,19 @@ class SimPort:
         self.p = subprocess.Popen([exe] + [str(i) for i in ids], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, text=True, bufsize=1)
         self.buf = b""
+        self._lock = threading.Lock()     # una pregunta y su respuesta a la vez (el lector corre en otro hilo)
 
     def _ask(self, line):
-        self.p.stdin.write(line + "\n")
-        self.p.stdin.flush()
-        return self.p.stdout.readline().strip()
+        with self._lock:
+            self.p.stdin.write(line + "\n")
+            self.p.stdin.flush()
+            return self.p.stdout.readline().strip()
 
     def set_raw(self, idx, value):
         assert self._ask("RAW %d %d" % (idx, value)) == "OK"
+
+    def set_mag(self, idx, value):
+        assert self._ask("MAG %d %d" % (idx, value)) == "OK"
 
     def reset_input_buffer(self):
         self.buf = b""
@@ -329,6 +383,9 @@ def main():
     sp.add_argument("--count", type=int, default=20)
     sp.add_argument("--rate", type=float, default=20, help="rondas por segundo (0 = lo mas rapido)")
     sp.add_argument("--csv", action="store_true")
+    sp = add("bench", cmd_bench, ("ids", {"type": int, "nargs": "+"}))
+    sp.add_argument("--count", type=int, default=500)
+    sp.add_argument("--no-sync", action="store_true", help="sin snapshot (lectura en vivo)")
     sp = sub.add_parser("selftest")
     sp.add_argument("--sim", help="ruta a sim_slave.exe")
     sp.set_defaults(fn=None)
@@ -341,7 +398,7 @@ def main():
     import serial
     with serial.Serial(a.port, a.baud, bytesize=8, parity="N", stopbits=1, timeout=a.timeout) as ser:
         try:
-            a.fn(Bus(ser), a)
+            a.fn(Bus(ser, baud=a.baud), a)
         except ModbusError as e:
             print("ERROR:", e)
             return 1

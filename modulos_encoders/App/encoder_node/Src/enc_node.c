@@ -80,6 +80,7 @@ int enc_node_init(I2C_HandleTypeDef *hi2c)
     if (swuart_init() != 0)
         return -1;
 
+    s_status_div = ENC_STATUS_EVERY_N - 1;   /* la primera muestra tambien lee el estado del iman */
     sample();
     s_last_tick = HAL_GetTick();
     s_running = 1;
