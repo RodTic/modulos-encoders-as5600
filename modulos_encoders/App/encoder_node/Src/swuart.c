@@ -18,6 +18,10 @@
 #define GAP_PSC       (ENC_SYSCLK_HZ / 1000000u - 1u)
 #define GAP_TICKS     (((ENC_GAP_US * (ENC_SYSCLK_HZ / (GAP_PSC + 1u))) + 999999u) / 1000000u)
 
+/* Las ISR de bit tienen que ser rapidas (a 230400 el bit dura 192 ciclos) aunque el proyecto
+ * compile con -O0, como el Debug de CubeIDE: a -O0 son ~50 % mas largas y ya no caben. */
+#define ISR_RAPIDA __attribute__((optimize("Os")))
+
 #define TX_HIGH()  (GPIOB->BSRR = (1u << 9))
 #define TX_LOW()   (GPIOB->BSRR = (1u << (9 + 16)))
 #define DE_ON()    (GPIOA->BSRR = (1u << 8))
@@ -168,7 +172,7 @@ static void rx_byte_done(uint8_t stop_level)
     TIM17->CR1 |= TIM_CR1_CEN;
 }
 
-void swuart_tim16_isr(void)
+ISR_RAPIDA void swuart_tim16_isr(void)
 {
     TIM16->SR = 0;
 
@@ -207,7 +211,7 @@ void swuart_tim16_isr(void)
     }
 }
 
-void swuart_exti_isr(void)
+ISR_RAPIDA void swuart_exti_isr(void)
 {
     if (EXTI->PR & RX_EXTI) {
         EXTI->PR = RX_EXTI;
@@ -224,7 +228,7 @@ void swuart_exti_isr(void)
     }
 }
 
-void swuart_tim17_isr(void)
+ISR_RAPIDA void swuart_tim17_isr(void)
 {
     TIM17->SR = 0;
     if (s.rx_len)
@@ -232,7 +236,8 @@ void swuart_tim17_isr(void)
 }
 
 #if ENC_DEFINE_IRQ_HANDLERS
-void TIM16_IRQHandler(void)      { swuart_tim16_isr(); }
-void TIM17_IRQHandler(void)      { swuart_tim17_isr(); }
-void EXTI4_15_IRQHandler(void)   { swuart_exti_isr(); }
+/* Alias, no funciones envoltorio: la interrupcion entra directo a la ISR sin una llamada de mas. */
+void TIM16_IRQHandler(void)      __attribute__((alias("swuart_tim16_isr")));
+void TIM17_IRQHandler(void)      __attribute__((alias("swuart_tim17_isr")));
+void EXTI4_15_IRQHandler(void)   __attribute__((alias("swuart_exti_isr")));
 #endif

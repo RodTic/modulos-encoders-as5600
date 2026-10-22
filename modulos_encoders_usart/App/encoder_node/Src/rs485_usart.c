@@ -13,6 +13,10 @@
 #define GAP_PSC     (ENC_SYSCLK_HZ / 1000000u - 1u)
 #define GAP_TICKS   (((ENC_GAP_US * (ENC_SYSCLK_HZ / (GAP_PSC + 1u))) + 999999u) / 1000000u)
 
+/* Las ISR tienen que ser rapidas (a 921600 llega un byte cada 480 ciclos) aunque el proyecto
+ * compile con -O0, como el Debug de CubeIDE. */
+#define ISR_RAPIDA  __attribute__((optimize("Os")))
+
 #define DE_ON()     (GPIOA->BSRR = (1u << 8))
 #define DE_OFF()    (GPIOA->BSRR = (1u << (8 + 16)))
 #define RX_ERR_FLAGS (USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NCF)
@@ -142,7 +146,7 @@ static void rx_restart_gap(void)
     TIM17->CR1 |= TIM_CR1_CEN;
 }
 
-void rs485_usart1_isr(void)
+ISR_RAPIDA void rs485_usart1_isr(void)
 {
     uint32_t isr = USART1->ISR;
     uint32_t cr1 = USART1->CR1;
@@ -184,7 +188,7 @@ void rs485_usart1_isr(void)
     }
 }
 
-void rs485_tim17_isr(void)
+ISR_RAPIDA void rs485_tim17_isr(void)
 {
     TIM17->SR = 0;
     if (s.rx_len || s.rx_err)
@@ -192,6 +196,7 @@ void rs485_tim17_isr(void)
 }
 
 #if ENC_DEFINE_IRQ_HANDLERS
-void USART1_IRQHandler(void)  { rs485_usart1_isr(); }
-void TIM17_IRQHandler(void)   { rs485_tim17_isr(); }
+/* Alias, no funciones envoltorio: la interrupcion entra directo a la ISR sin una llamada de mas. */
+void USART1_IRQHandler(void)  __attribute__((alias("rs485_usart1_isr")));
+void TIM17_IRQHandler(void)   __attribute__((alias("rs485_tim17_isr")));
 #endif

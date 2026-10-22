@@ -12,6 +12,9 @@
 *.exe
 *.bak
 
+# Lo regenera CubeIDE y su hash cambia en cada compilacion
+**/.settings/language.settings.xml
+
 # Cache de Python
 __pycache__/
 *.pyc
