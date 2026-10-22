@@ -112,9 +112,11 @@ class LectorEncoders:
     puerto: nombre del puerto ("COM6") o, para pruebas, un objeto con read/write/
     reset_input_buffer/close. baudios: los del firmware. sincronizar=False omite el
     snapshot y lee el angulo en vivo (algo mas rapido, pero cada canal en un instante).
+    ids: IDs (1..6) de las placas que de verdad estan conectadas; por defecto las 6. Las
+    demas no se consultan: su canal queda en NaN y no suma errores.
     """
 
-    def __init__(self, puerto, baudios: int, sincronizar: bool = True):
+    def __init__(self, puerto, baudios: int, sincronizar: bool = True, ids=None):
         if isinstance(puerto, str):
             try:
                 self._serial = serial.Serial(puerto, baudios, bytesize=8, parity="N", stopbits=1,
@@ -129,6 +131,9 @@ class LectorEncoders:
         else:
             self._serial = puerto
 
+        self._ids = tuple(range(1, NUM_ENCODERS + 1)) if ids is None else tuple(sorted(set(ids)))
+        if not self._ids or self._ids[0] < 1 or self._ids[-1] > NUM_ENCODERS:
+            raise ValueError("ids debe ser un subconjunto de 1..%d" % NUM_ENCODERS)
         self._baudios = baudios
         self._sincronizar = sincronizar
         self._espera_broadcast = espera_tras_broadcast_s(baudios)
@@ -197,15 +202,17 @@ class LectorEncoders:
 
         nuevos = [None] * NUM_ENCODERS
         ahora = time.monotonic()
-        for i in range(NUM_ENCODERS):
+        for nodo in self._ids:
+            i = nodo - 1
             if ahora < self._saltar_hasta[i]:
                 continue                       # placa caida: se vuelve a probar mas tarde
-            regs = self._consultar(i + 1, direccion, cantidad)
+            regs = self._consultar(nodo, direccion, cantidad)
             if regs is None:
                 self._fallos_seguidos[i] += 1
                 if self._fallos_seguidos[i] >= FALLOS_PARA_SALTAR:
                     self._saltar_hasta[i] = time.monotonic() + SALTAR_S
-                    self._fallos_seguidos[i] = 0
+                    # al reintentar basta un fallo para volver a saltarla (1 espera por segundo, no 2)
+                    self._fallos_seguidos[i] = FALLOS_PARA_SALTAR - 1
                 continue
             self._fallos_seguidos[i] = 0
 
@@ -228,7 +235,7 @@ class LectorEncoders:
             for i, v in enumerate(nuevos):
                 if v is not None:
                     self._angulos[i] = v
-                else:
+                elif (i + 1) in self._ids:
                     self._errores[i] += 1      # se conserva el ultimo valor bueno
         return alguno
 

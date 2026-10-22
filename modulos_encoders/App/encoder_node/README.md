@@ -95,7 +95,7 @@ lector = LectorEncoders("COM6", 230400)   # los baudios del firmware
 print(lector.angulos, lector.frecuencia_hz)
 ```
 
-Cada ronda hace un snapshot por broadcast y una consulta por placa. Si un canal falla (sin respuesta, imán ausente, CRC mala, snapshot perdido) conserva su último valor bueno y suma un error. Una placa caída se salta 1 s para no frenar a las demás. `sincronizar=False` omite el snapshot (más rápido, pero cada canal en un instante distinto).
+Cada ronda hace un snapshot por broadcast y una consulta por placa. Si un canal falla (sin respuesta, imán ausente, CRC mala, snapshot perdido) conserva su último valor bueno y suma un error. Una placa caída se salta 1 s para no frenar a las demás. `sincronizar=False` omite el snapshot (más rápido, pero cada canal en un instante distinto). Con menos de 6 placas conectadas, pasa cuáles existen: `LectorEncoders("COM6", 921600, ids=(1, 2))`. Las demás no se consultan y sus canales quedan en `NaN` (tu cinemática debe tolerarlo, igual que antes con un canal que nunca respondió). Cada placa necesita su propio ID (se asigna una por una con `set-id`, porque todas vienen como 247).
 
 **Frecuencia estimada** (sin medir; la incógnita es la latencia USB de tu adaptador, entre 1 y 2,5 ms por consulta): **~40 a 60 rondas por segundo** con este firmware (230400 baudios), frente a ~35 Hz del ESP32. El baudrate casi no influye; mandan el silencio de fin de trama y la latencia USB. El proyecto con USART de hardware llega a ~45 a 80 Hz.
 

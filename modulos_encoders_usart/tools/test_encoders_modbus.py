@@ -195,7 +195,44 @@ def main():
     check(all(nodo != 0 for nodo, _ in port.escrituras), "sin snapshot: no hay broadcast")
     lector.cerrar()
 
-    # --- 8) esperas calculadas igual que el firmware
+    # --- 8) solo algunas placas conectadas (ids): no se consulta a las demas ni suman errores
+    sim, port, _ = nuevo(ids=(1, 2))
+    sim.set_raw(0, 512)
+    sim.set_raw(1, 1536)
+    lector = em.LectorEncoders(port, 921600, ids=(1, 2))
+    check(esperar_hasta(lambda: not any(math.isnan(a) for a in lector.angulos[:2])), "ids=(1,2): hay datos de las 2 placas")
+    ang = lector.angulos
+    check(abs(ang[0] - angulo(512)) < 1e-9 and abs(ang[1] - angulo(1536)) < 1e-9, "ids=(1,2): grados correctos")
+    check(all(math.isnan(a) for a in ang[2:]), "ids=(1,2): los otros 4 canales quedan en NaN")
+    check(lector.estadisticas_errores[1] == [0] * 6, "ids=(1,2): ningun error por las placas que no existen")
+    check(all(port.consultas.get(n, 0) == 0 for n in (3, 4, 5, 6)), "ids=(1,2): no se consulta a las placas 3 a 6")
+    lector.cerrar()
+    try:
+        em.LectorEncoders(PuertoPrueba(enc_tool.SimPort(EXE, [1])), 921600, ids=(0, 7)).cerrar()
+        check(False, "ids fuera de 1..6 debe dar ValueError")
+    except ValueError:
+        check(True, "ids fuera de 1..6 da ValueError")
+
+    # --- 9) una placa ausente cuesta UNA consulta fallida por reintento, no dos
+    sim, port, _ = nuevo(ids=(1, 2, 3, 4, 5))
+    for i in range(5):
+        sim.set_raw(i, 700 + i)
+    saltar_original = em.SALTAR_S
+    em.SALTAR_S = 0.2
+    try:
+        t0 = time.monotonic()
+        lector = em.LectorEncoders(port, 921600)
+        time.sleep(1.1)
+        transcurrido = time.monotonic() - t0
+        lector.cerrar()
+    finally:
+        em.SALTAR_S = saltar_original
+    esperadas = 2 + int(transcurrido / 0.2) + 1        # 2 fallos iniciales + 1 reintento por periodo
+    check(port.consultas.get(6, 0) <= esperadas,
+          "placa ausente: %d consultas al nodo 6 en %.1f s (maximo %d; con 2 por reintento serian ~%d)"
+          % (port.consultas.get(6, 0), transcurrido, esperadas, 2 + 2 * int(transcurrido / 0.2)))
+
+    # --- 10) esperas calculadas igual que el firmware
     check(abs(em.silencio_nodo_s(921600) - 500e-6) < 1e-12 and abs(em.silencio_nodo_s(230400) - 500e-6) < 1e-12,
           "silencio 500 us a >= 230400")
     check(abs(em.silencio_nodo_s(115200) - 1750e-6) < 1e-12, "silencio 1750 us a 115200")
