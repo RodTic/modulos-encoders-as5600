@@ -53,11 +53,15 @@ IREG_RAW = 1              # en vivo: 1 = crudo, 2 = estado
 IREG_SNAP_RAW = 13        # tras un snapshot: 13 = crudo, 14 = estado, 15 = numero de snapshot
 STATUS_OK_MASK = 0x0F     # iman detectado (0x01), sin debil/fuerte/error I2C
 STATUS_OK = 0x01
+STATUS_I2C_ERROR = 0x08
 
 TIMEOUT_RESPUESTA_S = 0.02
 FALLOS_PARA_SALTAR = 2
 SALTAR_S = 1.0
-MARGEN_PROCESO_NODO_S = 0.0009   # lectura I2C fresca del nodo tras el snapshot + margen
+# Lo que tarda el nodo, tras detectar el fin de trama, en soltar su buffer: puede estar a mitad de una
+# lectura I2C (~1 ms) y luego hace otra fresca. Medido en una placa real (firmware Debug, -O0): con
+# 2.5 ms de espera total a 230400 hubo 0 errores en 400 rondas; con 2.0 ms, 3 % de errores.
+MARGEN_PROCESO_NODO_S = 0.0020
 
 
 def listar_puertos_serie():
@@ -114,9 +118,11 @@ class LectorEncoders:
     snapshot y lee el angulo en vivo (algo mas rapido, pero cada canal en un instante).
     ids: IDs (1..6) de las placas que de verdad estan conectadas; por defecto las 6. Las
     demas no se consultan: su canal queda en NaN y no suma errores.
+    exigir_iman: True (por defecto) descarta la lectura si el AS5600 dice que no detecta iman o que
+    esta debil/fuerte; False la acepta igual y solo descarta si la placa reporta error de I2C.
     """
 
-    def __init__(self, puerto, baudios: int, sincronizar: bool = True, ids=None):
+    def __init__(self, puerto, baudios: int, sincronizar: bool = True, ids=None, exigir_iman: bool = True):
         if isinstance(puerto, str):
             try:
                 self._serial = serial.Serial(puerto, baudios, bytesize=8, parity="N", stopbits=1,
@@ -135,6 +141,7 @@ class LectorEncoders:
         if not self._ids or self._ids[0] < 1 or self._ids[-1] > NUM_ENCODERS:
             raise ValueError("ids debe ser un subconjunto de 1..%d" % NUM_ENCODERS)
         self._baudios = baudios
+        self._exigir_iman = exigir_iman
         self._sincronizar = sincronizar
         self._espera_broadcast = espera_tras_broadcast_s(baudios)
 
@@ -180,20 +187,21 @@ class LectorEncoders:
         while self._activo:
             inicio = time.perf_counter()
             try:
-                alguno = self._ronda()
+                respondio = self._ronda()
             except serial.SerialException:
                 break
             except Exception:
                 traceback.print_exc()
                 break
-            if not alguno:
-                time.sleep(0.01)              # nada responde: no girar a toda velocidad
+            if not respondio:
+                time.sleep(0.01)              # ninguna placa responde: no girar a toda velocidad
             dt = time.perf_counter() - inicio
             with self._lock:
                 self._periodo_s = dt if self._periodo_s == 0.0 else 0.9 * self._periodo_s + 0.1 * dt
 
     def _ronda(self):
-        """Una ronda sobre las 6 placas. Devuelve True si algun canal dio un valor bueno."""
+        """Una ronda sobre las placas. Devuelve True si alguna placa respondio (aunque su valor
+        se haya descartado por el iman): solo asi se sabe que el bus esta vivo."""
         if self._sincronizar:
             self._snapshot()
             direccion, cantidad = IREG_SNAP_RAW, 3
@@ -201,6 +209,7 @@ class LectorEncoders:
             direccion, cantidad = IREG_RAW, 2
 
         nuevos = [None] * NUM_ENCODERS
+        respondio = False
         ahora = time.monotonic()
         for nodo in self._ids:
             i = nodo - 1
@@ -215,9 +224,14 @@ class LectorEncoders:
                     self._fallos_seguidos[i] = FALLOS_PARA_SALTAR - 1
                 continue
             self._fallos_seguidos[i] = 0
+            respondio = True
 
             crudo, estado = regs[0], regs[1]
-            valido = (estado & STATUS_OK_MASK) == STATUS_OK and crudo < CUENTAS_POR_VUELTA
+            if self._exigir_iman:
+                estado_ok = (estado & STATUS_OK_MASK) == STATUS_OK
+            else:
+                estado_ok = not (estado & STATUS_I2C_ERROR)
+            valido = estado_ok and crudo < CUENTAS_POR_VUELTA
             if self._sincronizar:
                 seq = regs[2]
                 # seq 0 = nunca tomo un snapshot; igual al de la ronda anterior = se perdio el broadcast
@@ -237,7 +251,7 @@ class LectorEncoders:
                     self._angulos[i] = v
                 elif (i + 1) in self._ids:
                     self._errores[i] += 1      # se conserva el ultimo valor bueno
-        return alguno
+        return respondio
 
     # ------------------------------------------------------------ interfaz (igual que encoders.py)
     @property

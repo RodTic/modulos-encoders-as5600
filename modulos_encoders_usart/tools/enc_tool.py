@@ -60,8 +60,10 @@ def silencio_nodo_s(baud):
 
 def espera_tras_broadcast_s(baud):
     """Minimo entre un broadcast y la siguiente consulta: sale la trama (8 bytes), la placa
-    detecta el fin de trama y toma una lectura fresca (~0.9 ms)."""
-    return 80.0 / baud + silencio_nodo_s(baud) + 0.0009
+    detecta el fin de trama, termina su lectura I2C en curso y toma otra fresca. Los 2 ms de
+    margen se midieron en una placa real (firmware Debug): con 2.5 ms de espera total a 230400
+    hubo 0 errores en 400 rondas; con 2.0 ms, 3 %."""
+    return 80.0 / baud + silencio_nodo_s(baud) + 0.0020
 
 
 def esperar(segundos):

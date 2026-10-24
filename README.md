@@ -6,12 +6,12 @@ Firmware para un módulo de medición de ángulo: un sensor magnético AS5600 se
 
 Los dos son proyectos completos de STM32CubeIDE, con el mismo módulo `encoder_node`. Solo cambia cómo se comunican con el chip RS-485:
 
-| Carpeta | Puerto RS-485 | Baudrate | Lectura de 6 placas (estimada) | Requiere |
+| Carpeta | Puerto RS-485 | Baudrate | Lectura de 6 placas | Requiere |
 |---|---|---|---|---|
-| `modulos_encoders/` | UART por software en PB9 (Tx) y PB10 (Rx) | 230400 | ~40 a 60 Hz | La placa tal como está |
-| `modulos_encoders_usart/` | USART1 de hardware en PA9 (Tx) y PA10 (Rx) | 921600 | ~45 a 80 Hz | Soldar un cable de PA9 (pin 30) a la red Tx y otro de PA10 (pin 31) a la red Rx |
+| `modulos_encoders/` | UART por software en PB9 (Tx) y PB10 (Rx) | 230400 | ~65 Hz (calculado de lo medido con 1 placa: 200 Hz) | La placa tal como está |
+| `modulos_encoders_usart/` | USART1 de hardware en PA9 (Tx) y PA10 (Rx) | 921600 | ~65 Hz o algo más (sin medir) | Soldar un cable de PA9 (pin 30) a la red Tx y otro de PA10 (pin 31) a la red Rx |
 
-Las frecuencias son estimaciones, no mediciones: la incógnita es la latencia USB del adaptador. Con las 6 placas conectadas se miden con `python tools/enc_tool.py -p COM6 -b <baudrate> bench 1 2 3 4 5 6`.
+Con una placa real se midieron 2,0 ms por consulta y 200 rondas/s; el valor para 6 placas se calculó a partir de eso. Con las 6 placas conectadas se mide con `python tools/enc_tool.py -p COM6 -b <baudrate> bench 1 2 3 4 5 6`.
 
 ## Usarlo en el proyecto grande (Python)
 

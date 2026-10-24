@@ -232,12 +232,35 @@ def main():
           "placa ausente: %d consultas al nodo 6 en %.1f s (maximo %d; con 2 por reintento serian ~%d)"
           % (port.consultas.get(6, 0), transcurrido, esperadas, 2 + 2 * int(transcurrido / 0.2)))
 
+    # --- 9b) placas que responden pero sin iman: no se frena el ciclo (solo se duerme si nadie responde)
+    sim, port, _ = nuevo(ids=(1, 2))
+    sim.set_mag(0, 0)
+    sim.set_mag(1, 0)                                  # sin iman en las dos
+    lector = em.LectorEncoders(port, 921600, ids=(1, 2))
+    time.sleep(0.6)
+    check(all(math.isnan(a) for a in lector.angulos), "sin iman y exigir_iman=True: no se acepta ninguna lectura")
+    check(lector.frecuencia_hz > 120, "responden sin iman: la ronda no se frena (%.0f Hz, con pausa de 10 ms serian < 100)"
+          % lector.frecuencia_hz)
+    lector.cerrar()
+
+    # --- 9c) exigir_iman=False acepta el angulo aunque el AS5600 no detecte iman
+    sim, port, _ = nuevo(ids=(1, 2))
+    sim.set_mag(0, 0x10)                               # iman debil
+    sim.set_mag(1, 0)                                  # sin iman
+    sim.set_raw(0, 1024)
+    sim.set_raw(1, 2048)
+    lector = em.LectorEncoders(port, 921600, ids=(1, 2), exigir_iman=False)
+    check(esperar_hasta(lambda: not any(math.isnan(a) for a in lector.angulos[:2])), "exigir_iman=False: hay datos sin iman")
+    check(abs(lector.angulos[0] - 90.0) < 1e-9 and abs(lector.angulos[1] - 180.0) < 1e-9,
+          "exigir_iman=False: acepta iman debil y ausente")
+    lector.cerrar()
+
     # --- 10) esperas calculadas igual que el firmware
     check(abs(em.silencio_nodo_s(921600) - 500e-6) < 1e-12 and abs(em.silencio_nodo_s(230400) - 500e-6) < 1e-12,
           "silencio 500 us a >= 230400")
     check(abs(em.silencio_nodo_s(115200) - 1750e-6) < 1e-12, "silencio 1750 us a 115200")
-    check(em.espera_tras_broadcast_s(921600) < 0.002 and em.espera_tras_broadcast_s(230400) < 0.0025,
-          "espera tras broadcast < 2.5 ms")
+    check(0.0025 <= em.espera_tras_broadcast_s(921600) < 0.004 and 0.0025 <= em.espera_tras_broadcast_s(230400) < 0.004,
+          "espera tras broadcast entre 2.5 y 4 ms (la que dio 0 errores en la placa)")
 
     print("%d falla(s)" % len(fallas))
     return 1 if fallas else 0
