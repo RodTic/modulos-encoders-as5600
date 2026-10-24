@@ -15,6 +15,9 @@
 # Lo regenera CubeIDE y su hash cambia en cada compilacion
 **/.settings/language.settings.xml
 
+# Configuracion de Run/Debug de CubeIDE (tiene rutas de cada PC y se regenera sola)
+*.launch
+
 # Cache de Python
 __pycache__/
 *.pyc
