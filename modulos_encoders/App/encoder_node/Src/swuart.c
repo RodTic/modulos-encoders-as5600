@@ -160,10 +160,8 @@ int swuart_send(const uint8_t *buf, uint16_t len)
     return 0;
 }
 
-static void rx_byte_done(uint8_t stop_level)
+ISR_RAPIDA static void rx_byte_done(void)
 {
-    if (!stop_level)
-        s.rx_err = 1;                              /* error de trama */
     if (s.frame_ready || s.rx_len >= MB_FRAME_MAX)
         s.rx_err = 1;                              /* desbordado: la trama se pierde */
     else
@@ -180,13 +178,17 @@ ISR_RAPIDA void swuart_tim16_isr(void)
         uint32_t level = RX_LEVEL();
         if (s.rx_nbit == 0)
             TIM16->ARR = BIT_TICKS - 1u;           /* de ahi en mas, un bit por tick */
-        if (s.rx_nbit < 8u) {
-            s.rx_shift = (uint8_t)((s.rx_shift >> 1) | (level << 7));
-            s.rx_nbit++;
-        } else {                                   /* bit de parada */
+        s.rx_shift = (uint8_t)((s.rx_shift >> 1) | (level << 7));
+        if (++s.rx_nbit == 8u) {
+            /* Ultimo bit de datos: el byte esta completo y se cierra AQUI, no en el bit de
+             * parada. El siguiente byte puede empezar justo al terminar la parada (1.5 bits
+             * despues de este muestreo) y esta ISR tarda ~0.5 bit a 230400: rearmar el EXTI
+             * despues de la parada llegaba tarde y se perdia el flanco de arranque, con lo que
+             * todos los bytes desde el segundo salian desalineados. El bit de parada no se
+             * comprueba; la CRC de la trama protege. */
             TIM16->CR1 &= ~TIM_CR1_CEN;
             TIM16->DIER = 0;
-            rx_byte_done((uint8_t)level);
+            rx_byte_done();
             s.state = ST_IDLE;
             EXTI->PR = RX_EXTI;
             EXTI->IMR |= RX_EXTI;
