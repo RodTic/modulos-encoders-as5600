@@ -9,10 +9,13 @@ Solo necesita pyserial (pip install pyserial). Ejemplos (COM5 = tu adaptador USB
   python enc_tool.py -p COM5 set-offset 1 1500 --save
   python enc_tool.py -p COM5 set-zero 1 --save         # la posicion actual pasa a ser 0
   python enc_tool.py -p COM5 set-dir 1 1 --save        # invertir el sentido
-  python enc_tool.py -p COM5 poll 1 2 3 4 5 6 --count 100 --rate 50 --csv > datos.csv
+  python enc_tool.py -p COM5 poll 1 2 3 4 5 6 --rate 20   # lee sin parar; ESPACIO pausa/continua, Q sale
+  python enc_tool.py -p COM5 poll 1 2 3 4 5 6 --rate 50 --csv > datos.csv
   python enc_tool.py selftest                          # prueba sin hardware
 """
 import argparse
+import contextlib
+import io
 import os
 import struct
 import subprocess
@@ -201,32 +204,86 @@ def cmd_simple(cmd):
     return lambda bus, a: bus.command(a.id, cmd)
 
 
-def cmd_poll(bus, a):
-    """Snapshot por broadcast y lectura del angulo congelado de cada nodo."""
+TECLA_PAUSA = " "                       # barra espaciadora: pausa / continua
+TECLAS_SALIR = ("q", "Q", "\x1b", "\x03")   # Q, Esc o Ctrl+C
+
+
+def leer_tecla():
+    """Tecla pulsada o None, sin bloquear. Solo funciona en Windows (msvcrt); en otros sistemas
+    devuelve siempre None y poll se detiene con Ctrl+C."""
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+    if not msvcrt.kbhit():
+        return None
+    c = msvcrt.getwch()
+    if c in ("\x00", "\xe0"):           # tecla especial (flechas, F1...): trae un segundo codigo
+        msvcrt.getwch()
+        return None
+    return c
+
+
+def cmd_poll(bus, a, leer_tecla=leer_tecla):
+    """Snapshot por broadcast y lectura del angulo congelado de cada nodo, sin parar hasta que lo
+    detengas (o hasta --count rondas, si lo pasas). ESPACIO pausa y vuelve a continuar (en pausa no
+    se manda nada al bus); Q, Esc o Ctrl+C salen. Los avisos van por stderr para no ensuciar un CSV."""
+    aviso = sys.stderr
+    limite = "se detiene tras %d rondas" % a.count if a.count > 0 else "sin limite de rondas"
+    print("poll: ESPACIO = pausar/continuar, Q = salir (%s)" % limite, file=aviso, flush=True)
     if a.csv:
-        print("t_s," + ",".join("id%d_deg" % n for n in a.ids) + ",seq")
+        print("t_s," + ",".join("id%d_deg" % n for n in a.ids) + ",seq", flush=True)
     period = 1.0 / a.rate if a.rate > 0 else 0
     t0 = time.time()
-    for k in range(a.count):
-        t_start = time.time()
-        bus.snapshot()
-        row, seqs = [], set()
-        for node in a.ids:
-            try:
-                ang, seq = bus.read_input(node, IREG_SNAP, 2)
-                row.append(deg(ang))
-                seqs.add(seq)
-            except ModbusError:
-                row.append(float("nan"))
-        note = "" if len(seqs) <= 1 else "  (!) snapshots distintos %s" % sorted(seqs)
-        t = time.time() - t0
-        if a.csv:
-            print("%.4f," % t + ",".join("%.3f" % v for v in row) + ",%s" % (sorted(seqs)[0] if seqs else ""))
-        else:
-            print("t=%7.3f  " % t + "  ".join("%d:%7.2f" % (n, v) for n, v in zip(a.ids, row)) + note)
-        sleep = period - (time.time() - t_start)
-        if sleep > 0:
-            time.sleep(sleep)
+    pausado_desde, pausa_total, k = None, 0.0, 0
+    try:
+        while a.count <= 0 or k < a.count:
+            salir = False
+            while True:                                  # todas las teclas que haya pendientes
+                c = leer_tecla()
+                if c is None:
+                    break
+                if c == TECLA_PAUSA:
+                    if pausado_desde is None:
+                        pausado_desde = time.time()
+                        print("[PAUSA] ESPACIO para continuar", file=aviso, flush=True)
+                    else:
+                        pausa_total += time.time() - pausado_desde
+                        pausado_desde = None
+                        print("[CONTINUA]", file=aviso, flush=True)
+                elif c in TECLAS_SALIR:
+                    salir = True
+            if salir:
+                break
+            if pausado_desde is not None:
+                time.sleep(0.03)
+                continue
+
+            t_start = time.time()
+            bus.snapshot()
+            row, seqs = [], set()
+            for node in a.ids:
+                try:
+                    ang, seq = bus.read_input(node, IREG_SNAP, 2)
+                    row.append(deg(ang))
+                    seqs.add(seq)
+                except ModbusError:
+                    row.append(float("nan"))
+            note = "" if len(seqs) <= 1 else "  (!) snapshots distintos %s" % sorted(seqs)
+            t = time.time() - t0 - pausa_total           # el tiempo no cuenta las pausas
+            if a.csv:
+                print("%.4f," % t + ",".join("%.3f" % v for v in row) + ",%s" % (sorted(seqs)[0] if seqs else ""),
+                      flush=True)
+            else:
+                print("t=%7.3f  " % t + "  ".join("%d:%7.2f" % (n, v) for n, v in zip(a.ids, row)) + note,
+                      flush=True)
+            k += 1
+            sleep = period - (time.time() - t_start)
+            if sleep > 0:
+                time.sleep(sleep)
+    except KeyboardInterrupt:
+        pass
+    print("poll detenido tras %d rondas" % k, file=aviso, flush=True)
 
 
 def cmd_bench(bus, a):
@@ -349,6 +406,67 @@ def selftest(a):
     check(bus.read_input(3, IREG_ANGLE_CAL, 1) == [3000], "la lectura en vivo si sigue al angulo")
     sim.close()
 
+    # poll: sin limite, ESPACIO pausa (sin trafico en el bus) y reanuda, Q sale; con --count se detiene solo
+    sim = SimPort(exe, [1, 2])
+    for k in range(2):
+        sim.set_raw(k, 512 * (k + 1))
+
+    class PuertoContado:
+        def __init__(self, s):
+            self.s, self.escrituras = s, 0
+
+        def reset_input_buffer(self):
+            self.s.reset_input_buffer()
+
+        def write(self, d):
+            self.escrituras += 1
+            self.s.write(d)
+
+        def read(self, n):
+            return self.s.read(n)
+
+        def flush(self):
+            pass
+
+    pc = PuertoContado(sim)
+    pbus = Bus(pc, retries=0)
+    est = {"fase": 0, "t": 0.0, "al_pausar": 0, "al_seguir": 0, "inicio": time.time()}
+
+    def teclas():
+        if time.time() - est["inicio"] > 8:                      # seguridad: no colgar la prueba
+            return "q"
+        e = pc.escrituras
+        if est["fase"] == 0 and e >= 20:
+            est.update(fase=1, t=time.time(), al_pausar=e)
+            return " "                                           # pausa
+        if est["fase"] == 1 and time.time() - est["t"] > 0.3:
+            est.update(fase=2, al_seguir=pc.escrituras)
+            return " "                                           # continua
+        if est["fase"] == 2 and pc.escrituras >= est["al_seguir"] + 15:
+            est["fase"] = 3
+            return "q"
+        return None
+
+    args = argparse.Namespace(ids=[1, 2], count=0, rate=0, csv=False)
+    sal, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(sal), contextlib.redirect_stderr(err):
+        cmd_poll(pbus, args, leer_tecla=teclas)
+    check(est["fase"] == 3, "poll sin limite: pausa con ESPACIO, continua con ESPACIO y sale con Q")
+    check(est["al_seguir"] == est["al_pausar"], "en pausa no se manda nada al bus")
+    check("[PAUSA]" in err.getvalue() and "[CONTINUA]" in err.getvalue(), "avisa de la pausa y la reanudacion")
+    filas = [l for l in sal.getvalue().splitlines() if l.startswith("t=")]
+    # cada ronda son 3 escrituras (snapshot + 2 lecturas): 20 antes de la pausa y 15 despues = ~12 filas
+    check(len(filas) >= 10 and "1:" in filas[0] and "2:" in filas[0], "poll imprime las lecturas (%d filas)" % len(filas))
+
+    args = argparse.Namespace(ids=[1, 2], count=3, rate=0, csv=True)
+    sal, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(sal), contextlib.redirect_stderr(err):
+        cmd_poll(pbus, args, leer_tecla=lambda: None)
+    lineas = sal.getvalue().splitlines()
+    check(len(lineas) == 4 and lineas[0].startswith("t_s,") and "ESPACIO" not in sal.getvalue(),
+          "con --count 3 se detiene solo y el CSV sale limpio (avisos por stderr)")
+    sim.close()
+
     print("%d falla(s)" % len(fails))
     return 1 if fails else 0
 
@@ -382,7 +500,7 @@ def main():
     add("reset", cmd_simple(CMD_RESET), ("id", num))
     add("snapshot", lambda bus, a: bus.snapshot())
     sp = add("poll", cmd_poll, ("ids", {"type": int, "nargs": "+"}))
-    sp.add_argument("--count", type=int, default=20)
+    sp.add_argument("--count", type=int, default=0, help="rondas a leer; 0 = sin limite (por defecto)")
     sp.add_argument("--rate", type=float, default=20, help="rondas por segundo (0 = lo mas rapido)")
     sp.add_argument("--csv", action="store_true")
     sp = add("bench", cmd_bench, ("ids", {"type": int, "nargs": "+"}))

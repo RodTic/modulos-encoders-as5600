@@ -107,6 +107,14 @@ python tools/enc_tool.py -p COM6 -b 230400 bench 1 2 3 4 5 6 --count 500
 
 Poner el resultado en `FRECUENCIA_FIRMWARE_HZ` de `config.py` (se usa para decidir si los datos están frescos).
 
+**Ver los ángulos en vivo.** `poll` lee sin parar hasta que lo detengas, desde que lo escribes:
+
+```
+python tools/enc_tool.py -p COM10 -b <baudrate> poll 247 --rate 20
+```
+
+Con **ESPACIO** lo pausas (en pausa no se manda nada al bus) y con **ESPACIO** otra vez continúa. **Q**, Esc o Ctrl+C lo detienen. Los avisos (`[PAUSA]`, `[CONTINUA]`) salen por stderr, así que `... poll 1 2 3 --csv > datos.csv` guarda un CSV limpio y el tiempo de cada fila no cuenta las pausas. Si pasas `--count N`, se detiene solo tras N rondas. Las teclas solo funcionan en Windows; en otros sistemas se detiene con Ctrl+C.
+
 ## Pruebas en PC (sin placa)
 
 Desde la carpeta del proyecto (`modulos_encoders/`):
