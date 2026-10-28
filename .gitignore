@@ -18,6 +18,9 @@
 # Configuracion de Run/Debug de CubeIDE (tiene rutas de cada PC y se regenera sola)
 *.launch
 
+# Estado de las vistas de CubeIDE (cambia en cada sesion de depuracion)
+**/.settings/com.st.*.prefs
+
 # Cache de Python
 __pycache__/
 *.pyc
