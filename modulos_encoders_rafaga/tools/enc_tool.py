@@ -217,7 +217,7 @@ def cmd_read(bus, a):
     h = bus.read_holding(a.id, 0, 3)
     i = bus.read_input(a.id, 0, 13)
     uid = "".join("%04X" % w for w in i[IREG_UID0:IREG_UID0 + 6])
-    print("nodo %d  firmware %d.%02d  UID %s" % (a.id, i[IREG_FW] >> 8, i[IREG_FW] & 0xFF, uid))
+    print("nodo %d  firmware %x.%02x  UID %s" % (a.id, i[IREG_FW] >> 8, i[IREG_FW] & 0xFF, uid))
     print("  offset=%d  sentido=%d  id=%d" % tuple(h))
     print("  angulo calibrado=%d (%.2f deg)  crudo=%d" % (i[0], deg(i[0]), i[1]))
     print("  estado=0x%02X [%s]  muestras=%d" % (i[2], describe_status(i[2]), i[3]))
@@ -234,7 +234,7 @@ def cmd_scan(bus, a):
             continue
         found += 1
         uid = bus.read_input(node, IREG_UID0, 6)
-        print("nodo %3d  firmware %d.%02d  UID %s" % (node, fw >> 8, fw & 0xFF, "".join("%04X" % w for w in uid)))
+        print("nodo %3d  firmware %x.%02x  UID %s" % (node, fw >> 8, fw & 0xFF, "".join("%04X" % w for w in uid)))
     print("%d nodo(s) encontrado(s)" % found)
 
 
