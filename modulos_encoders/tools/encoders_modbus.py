@@ -101,6 +101,15 @@ def espera_tras_broadcast_s(baudios):
     return 80.0 / baudios + silencio_nodo_s(baudios) + MARGEN_PROCESO_NODO_S
 
 
+def pausa_entre_tramas_s(baudios):
+    """Silencio que el maestro deja tras una respuesta antes de la siguiente peticion. Los demas
+    nodos oyen todo el bus: con menos silencio que el fin de trama, el nodo siguiente ve la respuesta
+    anterior y su peticion como una sola trama y la ignora. Medido con 2 placas a 230400 (pausa
+    contada desde que el PC recibe la respuesta): 0 us -> 87 % de fallos del 2.o nodo, 400 us -> 4 %,
+    600 us -> 1 %, 800 us -> 0 %. El margen de 0.4 ms sobre el silencio da 0.9 ms."""
+    return silencio_nodo_s(baudios) + 0.0004
+
+
 def _esperar(segundos):
     """Espera precisa para tiempos cortos (time.sleep solo es exacto a ~1 ms en Windows)."""
     fin = time.perf_counter() + segundos
@@ -144,6 +153,8 @@ class LectorEncoders:
         self._exigir_iman = exigir_iman
         self._sincronizar = sincronizar
         self._espera_broadcast = espera_tras_broadcast_s(baudios)
+        self._pausa = pausa_entre_tramas_s(baudios)
+        self._libre = 0.0                     # perf_counter desde el que se puede volver a hablar
 
         self._lock = threading.Lock()
         self._angulos = [math.nan] * NUM_ENCODERS
@@ -162,9 +173,11 @@ class LectorEncoders:
     def _consultar(self, nodo, direccion, cantidad):
         """FC 04. Devuelve la lista de registros o None si no hubo respuesta valida."""
         ser = self._serial
+        self._esperar_silencio()
         ser.write(_con_crc(struct.pack(">BBHH", nodo, 4, direccion, cantidad)))
         esperado = 5 + 2 * cantidad
         resp = ser.read(esperado)
+        self._libre = time.perf_counter() + self._pausa
         if (len(resp) != esperado
                 or struct.unpack("<H", resp[-2:])[0] != _crc16(resp[:-2])
                 or resp[0] != nodo or resp[1] != 4 or resp[2] != 2 * cantidad):
@@ -172,8 +185,14 @@ class LectorEncoders:
             return None
         return list(struct.unpack(">%dH" % cantidad, resp[3:-2]))
 
+    def _esperar_silencio(self):
+        falta = self._libre - time.perf_counter()
+        if falta > 0:
+            _esperar(falta)
+
     def _snapshot(self):
         """Broadcast (ID 0): escribe el comando SNAPSHOT en el registro 3. Nadie responde."""
+        self._esperar_silencio()
         self._serial.write(_con_crc(struct.pack(">BBHH", 0, 6, HREG_COMMAND, CMD_SNAPSHOT)))
         _esperar(self._espera_broadcast)
 

@@ -69,6 +69,15 @@ def espera_tras_broadcast_s(baud):
     return 80.0 / baud + silencio_nodo_s(baud) + 0.0020
 
 
+def pausa_entre_tramas_s(baud):
+    """Silencio que el maestro deja tras una respuesta antes de la siguiente peticion. Los demas nodos
+    oyen todo el bus: si entre la respuesta del nodo 1 y la peticion al nodo 2 hay menos silencio que
+    el fin de trama (silencio_nodo_s), el nodo 2 ve una sola trama larga y la ignora. Medido con 2
+    placas a 230400 (pausa contada desde que el PC recibe la respuesta): 0 us -> 87 % de fallos,
+    400 us -> 4 %, 600 us -> 1 %, 800 us -> 0 %. El margen de 0.4 ms sobre el silencio da 0.9 ms."""
+    return silencio_nodo_s(baud) + 0.0004
+
+
 def esperar(segundos):
     """Espera precisa para tiempos cortos (time.sleep solo es exacto a ~1 ms en Windows)."""
     fin = time.perf_counter() + segundos
@@ -85,19 +94,29 @@ class Bus:
         self.port = port
         self.retries = retries
         self.baud = baud
+        self._pausa = pausa_entre_tramas_s(baud)
+        self._libre = 0.0                     # perf_counter desde el que se puede volver a hablar
+
+    def _esperar_silencio(self):
+        falta = self._libre - time.perf_counter()
+        if falta > 0:
+            esperar(falta)
 
     def _txrx(self, req, expect_len):
         err = "sin respuesta (timeout)"
         for _ in range(self.retries + 1):
+            self._esperar_silencio()
             self.port.reset_input_buffer()
             self.port.write(req)
             self.port.flush()
             head = self.port.read(5)
             if len(head) < 5:
+                self._libre = time.perf_counter() + self._pausa
                 err = "sin respuesta (timeout)"
                 continue
             total = 5 if head[1] & 0x80 else expect_len
             resp = head + self.port.read(total - 5)
+            self._libre = time.perf_counter() + self._pausa
             if len(resp) < total or crc16(resp[:-2]) != struct.unpack("<H", resp[-2:])[0]:
                 err = "respuesta incompleta o con CRC mala"
                 continue
@@ -129,6 +148,7 @@ class Bus:
 
     def broadcast(self, addr, value):
         """Escritura a todos (id 0): nadie responde."""
+        self._esperar_silencio()
         self.port.reset_input_buffer()
         self.port.write(with_crc(struct.pack(">BBHH", 0, 6, addr, value)))
         self.port.flush()

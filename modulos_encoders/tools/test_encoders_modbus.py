@@ -261,6 +261,8 @@ def main():
     check(abs(em.silencio_nodo_s(115200) - 1750e-6) < 1e-12, "silencio 1750 us a 115200")
     check(0.0025 <= em.espera_tras_broadcast_s(921600) < 0.004 and 0.0025 <= em.espera_tras_broadcast_s(230400) < 0.004,
           "espera tras broadcast entre 2.5 y 4 ms (la que dio 0 errores en la placa)")
+    check(all(em.pausa_entre_tramas_s(b) > em.silencio_nodo_s(b) + 0.0003 for b in (115200, 230400, 921600)),
+          "la pausa entre tramas supera el silencio de fin de trama del nodo (si no, el nodo siguiente ignora la peticion)")
 
     print("%d falla(s)" % len(fallas))
     return 1 if fallas else 0
