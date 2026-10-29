@@ -115,7 +115,7 @@ python tools/enc_tool.py -p COM11 -b 230400 bench 1 2 --burst --count 1000
 
 `bench --burst` imprime las rondas por segundo, los errores por placa y, al final, `BURST_LATE` de cada una. En `LectorEncoders` la ráfaga está activa por defecto (`rafaga=False` vuelve a las consultas Modbus estándar).
 
-**Frecuencia (estimada, sin medir):** una ronda dura petición (0,35 ms) + 0,5 ms de silencio + 2,3 ms hasta el primer turno + 0,65 ms por cada placa que falte para la última + 0,48 ms de la última trama, más ~0,7 ms de USB y 1,5 ms de pausa antes de la siguiente petición. Con 6 placas son ~9 ms (**~110 Hz**), con 2 placas ~6,5 ms (~150 Hz), contra los ~48 Hz del modo estándar con 6. Lo que hay que medir en las placas: que `BURST_LATE` se quede en 0 y que no haya errores.
+**Frecuencia. Medido con 2 placas (230400, firmware Debug): 6,5 ms por ronda = 155 rondas/s, 0 errores en 1000 rondas y `BURST_LATE` 0 en las dos** (el modo estándar con snapshot da 9,2 ms = 108 Hz con las mismas placas). Para 6 placas es una extrapolación con el mismo modelo, que acertó con las 2: una ronda dura petición (0,35 ms) + 0,5 ms de silencio + 2,3 ms hasta el primer turno + 0,65 ms por cada placa que falte para la última + 0,48 ms de la última trama, más ~0,7 ms de USB y 1,5 ms de pausa antes de la siguiente petición. Con 2 placas son 6,5 ms (medido) y con 6 placas ~9 ms (**~110 Hz**, sin medir), contra los ~48 Hz del modo estándar con 6. Lo que falta medir con las 6: que `BURST_LATE` se quede en 0 y que no haya errores.
 
 ## Notas de bus
 

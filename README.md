@@ -10,7 +10,7 @@ Los tres son proyectos completos de STM32CubeIDE, con el mismo módulo `encoder_
 |---|---|---|---|---|
 | `modulos_encoders/` | UART por software en PB9 (Tx) y PB10 (Rx) | 230400 | ~48 Hz (calculado de lo medido con 2 placas: 108 Hz; con 1 placa 200 Hz) | La placa tal como está |
 | `modulos_encoders_usart/` | USART1 de hardware en PA9 (Tx) y PA10 (Rx) | 921600 | ~48 Hz o algo más (sin medir) | Soldar un cable de PA9 (pin 30) a la red Tx y otro de PA10 (pin 31) a la red Rx |
-| `modulos_encoders_rafaga/` (piloto) | UART por software en PB9 y PB10, como el primero | 230400 | ~110 Hz estimados con modo ráfaga (sin medir) | La placa tal como está |
+| `modulos_encoders_rafaga/` (piloto) | UART por software en PB9 y PB10, como el primero | 230400 | ~110 Hz estimados con modo ráfaga (medido con 2 placas: 155 Hz, 0 errores; con 6 sin medir) | La placa tal como está |
 
 El proyecto **piloto** `modulos_encoders_rafaga/` agrega un modo "ráfaga" que no es Modbus estándar: un solo broadcast y cada placa contesta sola en su turno, en vez de una consulta por placa. Sigue entendiendo todo el Modbus estándar. Los detalles y las reglas del bus están en su `App/encoder_node/README.md`.
 
